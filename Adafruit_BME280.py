@@ -53,6 +53,10 @@ BME280_FILTER_4 = 2
 BME280_FILTER_8 = 3
 BME280_FILTER_16 = 4
 
+# MODES
+BME280_MODE_FORCED = 1
+BME280_MODE_NORMAL = 3
+
 # BME280 Registers
 
 BME280_REGISTER_DIG_T1 = 0x88  # Trimming parameter registers
@@ -91,7 +95,7 @@ BME280_REGISTER_DATA = 0xF7
 class BME280(object):
     def __init__(self, t_mode=BME280_OSAMPLE_1, p_mode=BME280_OSAMPLE_1, h_mode=BME280_OSAMPLE_1,
                  standby=BME280_STANDBY_250, filter=BME280_FILTER_off, address=BME280_I2CADDR, i2c=None,
-                 **kwargs):
+                 forced_mode=False, **kwargs):
         self._logger = logging.getLogger('Adafruit_BMP.BMP085')
         # Check that t_mode is valid.
         if t_mode not in [BME280_OSAMPLE_1, BME280_OSAMPLE_2, BME280_OSAMPLE_4,
@@ -122,6 +126,7 @@ class BME280(object):
             raise ValueError(
                 'Unexpected filter value {0}.'.format(filter))
         self._filter = filter
+        self._forced_mode = forced_mode
         # Create I2C device.
         if i2c is None:
             import Adafruit_GPIO.I2C as I2C
@@ -139,7 +144,7 @@ class BME280(object):
         self._device.write8(BME280_REGISTER_CONFIG, ((standby << 5) | (filter << 2)))
         time.sleep(0.002)
         self._device.write8(BME280_REGISTER_CONTROL_HUM, h_mode)  # Set Humidity Oversample
-        self._device.write8(BME280_REGISTER_CONTROL, ((t_mode << 5) | (p_mode << 2) | 3))  # Set Temp/Pressure Oversample and enter Normal mode
+        self._set_control()  # Set the control register with the requested temperature, pressure and operating mode
         self.t_fine = 0.0
 
     def _load_calibration(self):
@@ -184,11 +189,17 @@ class BME280(object):
         print 'dig_H5 = {0:d}'.format (self.dig_H5)
         print 'dig_H6 = {0:d}'.format (self.dig_H6)
         '''
+    def _set_control(self):
+        # Set Temp/Pressure Oversample and enter requested mode
+        self._device.write8(BME280_REGISTER_CONTROL, ((self._t_mode << 5) | (self._p_mode << 2)
+                | (BME280_MODE_FORCED if self._forced_mode else BME280_MODE_NORMAL)))
 
     def read_raw_temp(self):
         """Waits for reading to become available on device."""
         """Does a single burst read of all data values from device."""
         """Returns the raw (uncompensated) temperature from the sensor."""
+        # In forced mode, the mode needs to be reset before every measurement
+        self._set_control()
         while (self._device.readU8(BME280_REGISTER_STATUS) & 0x08):    # Wait for conversion to complete (TODO : add timeout)
             time.sleep(0.002)
         self.BME280Data = self._device.readList(BME280_REGISTER_DATA, 8)
